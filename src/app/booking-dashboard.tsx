@@ -4,7 +4,7 @@ import { useActionState, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { services, type Appointment } from '@/lib/domain';
-import { bookAction, cancelAction } from './actions';
+import { bookAction, cancelAction, type ActionState } from './actions';
 
 type Dashboard = { activeSubscriptions: number; events: {
   id: string; name: string; data: Appointment; timestamp: string; cursor: string;
@@ -37,8 +37,13 @@ function CancelForm({ id }: { id: string }) {
 }
 
 export function BookingDashboard({ appointments, dashboard }: { appointments: Appointment[]; dashboard: Dashboard }) {
-  const [state, action, pending] = useActionState(bookAction, {});
-  const [startsAt, setStartsAt] = useState('');
+  const [values, setValues] = useState({ dogName: '', ownerName: '', service: services[0] as string, localTime: '' });
+  const [state, action, pending] = useActionState(async (previous: ActionState, form: FormData) => {
+    const result = await bookAction(previous, form);
+    if (result.success) setValues({ dogName: '', ownerName: '', service: services[0], localTime: '' });
+    return result;
+  }, {});
+  const startsAt = values.localTime ? new Date(values.localTime).toISOString() : '';
   const router = useRouter();
   useEffect(() => { const timer = setInterval(() => router.refresh(), 5000); return () => clearInterval(timer); }, [router]);
   return <>
@@ -47,9 +52,9 @@ export function BookingDashboard({ appointments, dashboard }: { appointments: Ap
       <section className="hero"><div className="hero-copy"><span className="eyebrow">● THE GOOD-DOG GROOMING CLUB</span><h1>Fresh looks.<br/>Happy little <em>paws.</em></h1><p>Gentle grooming for your very best friend.<br/>Book a little pampering. We’ll bring the belly rubs.</p><div className="hero-tags"><span>♡ Kind, patient groomers</span><span>✧ Tail-wagging results</span></div></div><div className="hero-visual"><span className="art-caption">less scruff, more fluff.</span><DogIllustration/><span className="art-badge">100% good dogs<br/><strong>always welcome</strong></span></div></section>
       <div className="booking-grid">
         <section className="booking-card" id="book"><div className="section-kicker">01 / MAKE THEIR DAY</div><h2>A fresh start, booked.</h2><p className="section-description">Pick your pup’s perfect pamper session.</p>
-          <form action={action} className="booking-form"><div className="field-row"><label>Dog’s name<input name="dogName" placeholder="e.g. Biscuit" required maxLength={80}/></label><label>Your name<input name="ownerName" placeholder="e.g. Jamie" required maxLength={100}/></label></div>
-            <label>The pampering plan<select name="service" defaultValue={services[0]}>{services.map((service, i) => <option key={service} value={service}>{service} · {['45 min', '90 min', '30 min'][i]}</option>)}</select></label>
-            <label>Date & time <span className="label-note">your local time</span><input type="datetime-local" required onChange={e => setStartsAt(e.target.value ? new Date(e.target.value).toISOString() : '')}/></label><input type="hidden" name="startsAt" value={startsAt}/>
+          <form action={action} className="booking-form"><div className="field-row"><label>Dog’s name<input name="dogName" placeholder="e.g. Biscuit" required maxLength={80} value={values.dogName} onChange={e => setValues({ ...values, dogName: e.target.value })}/></label><label>Your name<input name="ownerName" placeholder="e.g. Jamie" required maxLength={100} value={values.ownerName} onChange={e => setValues({ ...values, ownerName: e.target.value })}/></label></div>
+            <label>The pampering plan<select name="service" value={values.service} onChange={e => setValues({ ...values, service: e.target.value })}>{services.map((service, i) => <option key={service} value={service}>{service} · {['45 min', '90 min', '30 min'][i]}</option>)}</select></label>
+            <label>Date & time <span className="label-note">your local time</span><input type="datetime-local" required value={values.localTime} onChange={e => setValues({ ...values, localTime: e.target.value })}/></label><input type="hidden" name="startsAt" value={startsAt}/>
             <button className="primary-button" disabled={pending}>{pending ? 'Saving your spot…' : 'Book a happy-dog day'}<span>↗</span></button>
             <div aria-live="polite">{state.error && <p role="alert" className="form-error">{state.error}</p>}{state.success && <p className="form-success">✓ {state.success}</p>}</div><p className="form-footnote">Plans change. Cancel anytime, no hard feelings.</p>
           </form>
