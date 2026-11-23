@@ -41,9 +41,16 @@ export async function subscribeEvent(params: unknown) {
   }
   const refreshBefore = input.ttlMs === null ? null : new Date(Date.now() + Math.min(input.ttlMs ?? 3600000, 86400000)).toISOString();
   const sql = db();
-  await sql`INSERT INTO subscriptions(id, url, name, arguments, secret, refresh_before, active)
-    VALUES (${id}, ${input.delivery.url}, ${input.name}, ${JSON.stringify(input.arguments)}::jsonb, ${input.delivery.secret}, ${refreshBefore}, true)
-    ON CONFLICT(id) DO UPDATE SET secret = EXCLUDED.secret, refresh_before = EXCLUDED.refresh_before, active = true`;
+  const [, inserted] = await sql.transaction([
+    sql`LOCK TABLE subscriptions IN SHARE ROW EXCLUSIVE MODE`,
+    sql`INSERT INTO subscriptions(id, url, name, arguments, secret, refresh_before, active)
+      SELECT ${id}, ${input.delivery.url}, ${input.name}, ${JSON.stringify(input.arguments)}::jsonb, ${input.delivery.secret}, ${refreshBefore}, true
+      WHERE (SELECT count(*) FROM subscriptions WHERE active AND (refresh_before IS NULL OR refresh_before > now())) < 25
+        OR EXISTS (SELECT 1 FROM subscriptions WHERE id = ${id} AND active AND (refresh_before IS NULL OR refresh_before > now()))
+      ON CONFLICT(id) DO UPDATE SET secret = EXCLUDED.secret, refresh_before = EXCLUDED.refresh_before, active = true
+      RETURNING id`,
+  ]);
+  if (!inserted.length) throw new RpcError(-32000, 'Active subscription limit reached (25); unsubscribe or wait for expiry');
   const [latest] = await sql`SELECT COALESCE(max(sequence), 0)::text AS cursor FROM events`;
   return { id, refreshBefore, cursor: input.cursor ?? latest.cursor as string, truncated: false };
 }

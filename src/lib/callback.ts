@@ -22,15 +22,32 @@ function publicAddress(address: string) {
 
 // Pin the resolved public address to prevent callbacks from reaching internal services via DNS rebinding.
 export async function postCallback(value: string, headers: Record<string, string>, body: string): Promise<{ status: number; body: string }> {
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      sendCallback(value, headers, body, controller.signal),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          controller.abort();
+          reject(new Error('Callback timeout'));
+        }, 5000);
+      }),
+    ]);
+  } finally { clearTimeout(timeout); }
+}
+
+async function sendCallback(value: string, headers: Record<string, string>, body: string, signal: AbortSignal): Promise<{ status: number; body: string }> {
   const url = validateCallback(value);
   const hostname = url.hostname.replace(/^\[|\]$/g, '');
   const addresses = await lookup(hostname, { all: true });
+  signal.throwIfAborted();
   const local = process.env.NODE_ENV === 'development' && url.protocol === 'http:' && hostname === '127.0.0.1';
   if (!addresses.length || (!local && addresses.some(({ address }) => !publicAddress(address)))) throw new Error('Callback address is not public');
   const target = addresses[0];
   return new Promise((resolve, reject) => {
     const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, {
-      method: 'POST', headers,
+      method: 'POST', headers, signal,
       lookup: (_host, options, callback) => options.all
         ? callback(null, [target]) : callback(null, target.address, target.family),
     }, response => {
@@ -39,8 +56,6 @@ export async function postCallback(value: string, headers: Record<string, string
       response.on('end', () => resolve({ status: response.statusCode ?? 0, body: text }));
       response.on('error', reject);
     });
-    const timeout = setTimeout(() => request.destroy(new Error('Callback timeout')), 4000);
-    request.on('close', () => clearTimeout(timeout));
     request.on('error', reject);
     request.end(body);
   });

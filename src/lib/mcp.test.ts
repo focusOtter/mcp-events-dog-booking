@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ sql: vi.fn(), post: vi.fn() }));
+const mocks = vi.hoisted(() => ({ sql: Object.assign(vi.fn(), { transaction: vi.fn() }), post: vi.fn() }));
 vi.mock('./db', () => ({ db: () => mocks.sql }));
 vi.mock('./callback', async importOriginal => ({ ...await importOriginal<typeof import('./callback')>(), postCallback: mocks.post }));
 import { createMcpHandler } from './mcp';
@@ -19,10 +19,22 @@ async function rpc(method: string, params = {}, id: unknown = 1) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.sql.mockResolvedValue([{ cursor: '0' }]);
+  mocks.sql.transaction.mockResolvedValue([[], [{ id: 'subscription' }]]);
   mocks.post.mockImplementation(async (_url, _headers, body) => ({ status: 200, body: JSON.stringify({ challenge: JSON.parse(body).challenge }) }));
 });
 
 describe('stateless JSON-RPC', () => {
+  it('returns a clear JSON-RPC error when the active subscription cap rejects an insert', async () => {
+    mocks.sql.transaction.mockResolvedValueOnce([[], []]);
+    expect((await rpc('events/subscribe', subscription)).error).toMatchObject({ code: -32000, message: expect.stringContaining('limit reached (25)') });
+  });
+  it('serializes capacity checks and allows active subscriptions to renew at capacity', async () => {
+    expect((await rpc('events/subscribe', subscription)).result).toHaveProperty('id');
+    const queries = mocks.sql.mock.calls.map(call => call[0].join('?'));
+    expect(queries.some(query => query.includes('LOCK TABLE subscriptions IN SHARE ROW EXCLUSIVE MODE'))).toBe(true);
+    expect(queries.some(query => query.includes('< 25') && query.includes('OR EXISTS') && query.includes('refresh_before > now()'))).toBe(true);
+    expect(mocks.sql.transaction).toHaveBeenCalledTimes(1);
+  });
   it('discovers both capability dialects and initializes legacy clients', async () => {
     const discover = await rpc('server/discover');
     expect(discover.result).toMatchObject({ resultType: 'complete', supportedVersions: ['2026-07-28', '2025-11-25'], capabilities: { tools: {}, events: {}, extensions: { 'io.modelcontextprotocol/events': {} } } });
