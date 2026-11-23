@@ -39,7 +39,8 @@ export async function subscribeEvent(params: unknown) {
   } catch {
     throw new RpcError(-32027, 'CallbackEndpointError', { reason: 'challenge_failed' });
   }
-  const refreshBefore = input.ttlMs === null ? null : new Date(Date.now() + Math.min(input.ttlMs ?? 3600000, 86400000)).toISOString();
+  const ttlMs = input.ttlMs === null ? 86400000 : input.ttlMs ?? 3600000;
+  const refreshBefore = new Date(Date.now() + Math.min(ttlMs, 86400000)).toISOString();
   const sql = db();
   const [, inserted] = await sql.transaction([
     sql`LOCK TABLE subscriptions IN SHARE ROW EXCLUSIVE MODE`,

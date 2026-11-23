@@ -61,6 +61,17 @@ describe('stateless JSON-RPC', () => {
 });
 
 describe('subscriptions', () => {
+  it.each([
+    [undefined, 3600000], [null, 86400000], [60000, 60000], [172800000, 86400000],
+  ])('grants a finite bounded lease for requested TTL %s', async (ttlMs, granted) => {
+    const before = Date.now();
+    const result = (await rpc('events/subscribe', { ...subscription, ttlMs })).result;
+    expect(Date.parse(result.refreshBefore)).toBeGreaterThanOrEqual(before + granted);
+    expect(Date.parse(result.refreshBefore)).toBeLessThanOrEqual(Date.now() + granted);
+    const insert = mocks.sql.mock.calls.find(call => call[0].join('?').includes('INSERT INTO subscriptions'))!;
+    expect(insert[0].join('?')).toContain('SELECT count(*) FROM subscriptions WHERE active AND (refresh_before IS NULL OR refresh_before > now())');
+    expect(insert).toContain(result.refreshBefore);
+  });
   it('verifies callbacks, caps TTL, renews idempotently, and unsubscribes', async () => {
     const first = (await rpc('events/subscribe', { ...subscription, ttlMs: 172800000 })).result;
     expect(first).toMatchObject({ resultType: 'complete', cursor: '0', truncated: false });
@@ -70,7 +81,8 @@ describe('subscriptions', () => {
     expect(mocks.post.mock.calls[0][1]['X-MCP-Subscription-Id']).toBe(first.id);
     const renewed = (await rpc('events/subscribe', { ...subscription, ttlMs: null, cursor: '4' })).result;
     expect(renewed.id).toBe(first.id);
-    expect(renewed.refreshBefore).toBeNull();
+    expect(Date.parse(renewed.refreshBefore) - Date.now()).toBeLessThanOrEqual(86400000);
+    expect(Date.parse(renewed.refreshBefore) - Date.now()).toBeGreaterThan(86390000);
     expect(renewed.cursor).toBe('4');
     expect((await rpc('events/unsubscribe', subscription)).result).toEqual({ resultType: 'complete' });
   });
