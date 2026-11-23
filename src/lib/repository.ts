@@ -15,7 +15,7 @@ export async function deliverEvent(event: GroomingEvent) {
     AND (refresh_before IS NULL OR refresh_before > now()) AND name = ${event.name}
     AND (NOT arguments ? 'service' OR arguments->>'service' = ${event.data.service})`;
   const body = JSON.stringify(event);
-  await Promise.all(subscribers.map(async subscriber => {
+  const outcomes = await Promise.allSettled(subscribers.map(async subscriber => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       let status: number | null = null;
       let error: string | null = null;
@@ -30,6 +30,14 @@ export async function deliverEvent(event: GroomingEvent) {
       if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 150));
     }
   }));
+  if (outcomes.some(outcome => outcome.status === 'rejected')) {
+    console.error('Webhook delivery or attempt logging failed for saved event', event.eventId);
+  }
+}
+
+async function deliverSavedEvent(event: GroomingEvent) {
+  try { await deliverEvent(event); }
+  catch { console.error('Webhook dispatch failed for saved event', event.eventId); }
 }
 
 export async function bookAppointment(input: unknown) {
@@ -45,7 +53,7 @@ export async function bookAppointment(input: unknown) {
   ) SELECT event_id AS "eventId", name, data, sequence::text AS cursor,
     to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS timestamp FROM emitted`;
   const event = rows[0] as GroomingEvent;
-  await deliverEvent(event);
+  await deliverSavedEvent(event);
   return event.data;
 }
 
@@ -62,7 +70,7 @@ export async function cancelAppointment(input: unknown) {
     to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS timestamp FROM emitted`;
   if (!rows.length) throw new Error('Appointment not found or already cancelled');
   const event = rows[0] as GroomingEvent;
-  await deliverEvent(event);
+  await deliverSavedEvent(event);
   return event.data;
 }
 
