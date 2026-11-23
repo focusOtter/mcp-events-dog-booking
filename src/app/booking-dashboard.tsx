@@ -31,16 +31,20 @@ function DogIllustration() {
   </svg>;
 }
 
-function CancelForm({ id }: { id: string }) {
+function CancelForm({ id, onCancel }: { id: string; onCancel: () => void }) {
   const [state, action, pending] = useActionState(cancelAction, {});
-  return <form action={action}><input type="hidden" name="id" value={id}/><button className="cancel-button" disabled={pending}>{pending ? 'Cancelling…' : 'Cancel appointment'}</button>{state.error && <p role="alert" className="form-error">{state.error}</p>}</form>;
+  return <form action={action} onSubmit={onCancel}><input type="hidden" name="id" value={id}/><button className="cancel-button" disabled={pending}>{pending ? 'Cancelling…' : 'Cancel appointment'}</button>{state.error && <p role="alert" className="form-error">{state.error}</p>}</form>;
 }
 
 export function BookingDashboard({ appointments, dashboard }: { appointments: Appointment[]; dashboard: Dashboard }) {
   const [values, setValues] = useState({ dogName: '', ownerName: '', service: services[0] as string, localTime: '' });
+  const [showConfirmation, setShowConfirmation] = useState(false);
   const [state, action, pending] = useActionState(async (previous: ActionState, form: FormData) => {
     const result = await bookAction(previous, form);
-    if (result.success) setValues({ dogName: '', ownerName: '', service: services[0], localTime: '' });
+    if (result.success) {
+      setValues({ dogName: '', ownerName: '', service: services[0], localTime: '' });
+      setShowConfirmation(true);
+    }
     return result;
   }, {});
   const startsAt = values.localTime ? new Date(values.localTime).toISOString() : '';
@@ -52,15 +56,15 @@ export function BookingDashboard({ appointments, dashboard }: { appointments: Ap
       <section className="hero"><div className="hero-copy"><span className="eyebrow">● THE GOOD-DOG GROOMING CLUB</span><h1>Fresh looks.<br/>Happy little <em>paws.</em></h1><p>Gentle grooming for your very best friend.<br/>Book a little pampering. We’ll bring the belly rubs.</p><div className="hero-tags"><span>♡ Kind, patient groomers</span><span>✧ Tail-wagging results</span></div></div><div className="hero-visual"><span className="art-caption">less scruff, more fluff.</span><DogIllustration/><span className="art-badge">100% good dogs<br/><strong>always welcome</strong></span></div></section>
       <div className="booking-grid">
         <section className="booking-card" id="book"><div className="section-kicker">01 / MAKE THEIR DAY</div><h2>A fresh start, booked.</h2><p className="section-description">Pick your pup’s perfect pamper session.</p>
-          <form action={action} className="booking-form"><div className="field-row"><label>Dog’s name<input name="dogName" placeholder="e.g. Biscuit" required maxLength={80} value={values.dogName} onChange={e => setValues({ ...values, dogName: e.target.value })}/></label><label>Your name<input name="ownerName" placeholder="e.g. Jamie" required maxLength={100} value={values.ownerName} onChange={e => setValues({ ...values, ownerName: e.target.value })}/></label></div>
+          <form action={action} onSubmit={() => setShowConfirmation(false)} onReset={event => event.preventDefault()} className="booking-form"><div className="field-row"><label>Dog’s name<input name="dogName" placeholder="e.g. Biscuit" required maxLength={80} value={values.dogName} onChange={e => setValues({ ...values, dogName: e.target.value })}/></label><label>Your name<input name="ownerName" placeholder="e.g. Jamie" required maxLength={100} value={values.ownerName} onChange={e => setValues({ ...values, ownerName: e.target.value })}/></label></div>
             <label>The pampering plan<select name="service" value={values.service} onChange={e => setValues({ ...values, service: e.target.value })}>{services.map((service, i) => <option key={service} value={service}>{service} · {['45 min', '90 min', '30 min'][i]}</option>)}</select></label>
             <label>Date & time <span className="label-note">your local time</span><input type="datetime-local" required value={values.localTime} onChange={e => setValues({ ...values, localTime: e.target.value })}/></label><input type="hidden" name="startsAt" value={startsAt}/>
             <button className="primary-button" disabled={pending}>{pending ? 'Saving your spot…' : 'Book a happy-dog day'}<span>↗</span></button>
-            <div aria-live="polite">{state.error && <p role="alert" className="form-error">{state.error}</p>}{state.success && <p className="form-success">✓ {state.success}</p>}</div><p className="form-footnote">Plans change. Cancel anytime, no hard feelings.</p>
+            <div aria-live="polite">{state.error && <p role="alert" className="form-error">{state.error}</p>}{state.success && showConfirmation && <p className="form-success">✓ {state.success}</p>}</div><p className="form-footnote">Plans change. Cancel anytime, no hard feelings.</p>
           </form>
         </section>
         <section className="appointments-section"><div className="appointment-heading"><div><div className="section-kicker">02 / COMING UP</div><h2>The pamper calendar</h2></div><span className="count-pill">{appointments.length} booked</span></div>
-          <div className="appointment-list">{appointments.length === 0 ? <div className="empty-state"><span className="empty-paw"><Paw/></span><h3>A little quiet before the fluff.</h3><p>No upcoming visits just yet.<br/>Book a spot and we’ll save the good shampoo.</p></div> : appointments.map(appointment => <article className="appointment" key={appointment.id}><div className="date-tile"><span>{new Date(appointment.startsAt).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })}</span><strong>{new Date(appointment.startsAt).getUTCDate()}</strong></div><div className="appointment-detail"><h3>{appointment.dogName}<span className="booked-badge">Booked</span></h3><p>{appointment.service} · {new Date(appointment.startsAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' })} UTC</p><p className="owner">with {appointment.ownerName}</p><CancelForm id={appointment.id}/></div><Paw className="appointment-paw"/></article>)}</div>
+          <div className="appointment-list">{appointments.length === 0 ? <div className="empty-state"><span className="empty-paw"><Paw/></span><h3>A little quiet before the fluff.</h3><p>No upcoming visits just yet.<br/>Book a spot and we’ll save the good shampoo.</p></div> : appointments.map(appointment => <article className="appointment" key={appointment.id}><div className="date-tile"><span>{new Date(appointment.startsAt).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })}</span><strong>{new Date(appointment.startsAt).getUTCDate()}</strong></div><div className="appointment-detail"><h3>{appointment.dogName}<span className="booked-badge">Booked</span></h3><p>{appointment.service} · {new Date(appointment.startsAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' })} UTC</p><p className="owner">with {appointment.ownerName}</p><CancelForm id={appointment.id} onCancel={() => setShowConfirmation(false)}/></div><Paw className="appointment-paw"/></article>)}</div>
           <div className="kind-note"><span>✦</span><p>A calmer kind of grooming.<br/><strong>One happy pup at a time.</strong></p></div>
         </section>
       </div>
